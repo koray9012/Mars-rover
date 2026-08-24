@@ -88,4 +88,4 @@ This project uses:
 Kicad
 Hack Club Macondo 
 
-Btw thank you for the pinecil Hack Club :)
+Btw thank you for the Power Supply Hack Club :)
