@@ -1,8 +1,8 @@
 #include <WiFi.h>
+#include <esp_now.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
 #include <SPI.h>
-#include <LoRa.h>
 #include <TinyGPS++.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -26,14 +26,6 @@
 #define GPS_RX          16
 #define GPS_TX          17
 
-// LoRa SPI Bus Pin Mapping
-#define LORA_SCK        5
-#define LORA_MISO       19
-#define LORA_MOSI       27
-#define LORA_SS         18
-#define LORA_RST        14
-#define LORA_DIO0       26
-
 // OLED Display Specs
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   64
@@ -49,6 +41,29 @@ Servo panelServo;
 Servo armSpinServo;
 Servo armLiftServo;
 Servo armGripServo;
+
+// --- ESP-NOW CONTROLLER STRUCT ---
+typedef struct struct_message {
+  int speedLeft;     
+  int speedRight;    
+  bool lmb;          
+  bool rmb;
+  bool mmb;
+  bool isFrozen;     
+} struct_message;
+
+struct_message gloveData;
+
+struct IdentityMessage {
+  char name[32];
+};
+IdentityMessage robotIdentity;
+
+unsigned long lastEspNowPacketTime = 0;
+String espNowManualCmd = "STOP";
+uint8_t controllerMac[6];
+bool controllerKnown = false;
+const char* ROBOT_NAME = "Mars-Rover";
 
 // --- State Machine & Telemetry Variables ---
 int currentMode = 0; // 0: Auto, 1: Manual+Safety, 2: Suicide, 3: Diagnostics
@@ -114,7 +129,7 @@ const char MAIN_PAGE[] PROGMEM = R"rawliteral(
       <b>[System Status]</b><br>
       Initializing Telemetry Stream...<br>
       GPS Lock: Searching...<br>
-      LoRa Transceiver: Active
+      ESP-NOW Transceiver: Active
     </div>
   </div>
 
@@ -135,29 +150,46 @@ const char MAIN_PAGE[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-// --- Server Route Handlers ---
-void handleRoot() {
-  server.send(200, "text/html", MAIN_PAGE);
+// --- ESP-NOW RECEIVE & GLOVE DISCOVERY ---
+void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
+  if (len == sizeof(struct_message)) {
+    memcpy(&gloveData, incomingData, sizeof(gloveData));
+    lastEspNowPacketTime = millis();
+
+    if (gloveData.isFrozen) {
+      espNowManualCmd = "STOP";
+    } else if (gloveData.speedLeft > 50 && gloveData.speedRight > 50) {
+      espNowManualCmd = "forward";
+    } else if (gloveData.speedLeft < -50 && gloveData.speedRight < -50) {
+      espNowManualCmd = "backward";
+    } else if (gloveData.speedLeft < -20 && gloveData.speedRight > 20) {
+      espNowManualCmd = "left";
+    } else if (gloveData.speedLeft > 20 && gloveData.speedRight < -20) {
+      espNowManualCmd = "right";
+    } else {
+      espNowManualCmd = "stop";
+    }
+
+    if (!controllerKnown && recv_info->src_addr != NULL) {
+      memcpy(controllerMac, recv_info->src_addr, 6);
+      esp_now_peer_info_t peerInfo = {};
+      memcpy(peerInfo.peer_addr, controllerMac, 6);
+      peerInfo.channel = 0;
+      peerInfo.encrypt = false;
+      if (esp_now_add_peer(&peerInfo) == ESP_OK) {
+        controllerKnown = true;
+      }
+    }
+
+    if (controllerKnown) {
+      strncpy(robotIdentity.name, ROBOT_NAME, sizeof(robotIdentity.name));
+      esp_now_send(controllerMac, (uint8_t *)&robotIdentity, sizeof(robotIdentity));
+    }
+  }
 }
 
-String getTelemetryPayload() {
-  String payload = "";
-  payload += "Mode: " + String(currentMode) + " | WiFi Clients: " + String(WiFi.softAPgetStationNum()) + "<br>";
-  payload += "GPS Sats: " + String(gps.satellites.value()) + " | Fix: " + String(gps.location.isValid() ? "YES" : "NO") + "<br>";
-  payload += "Lat: " + String(gps.location.lat(), 6) + " | Lng: " + String(gps.location.lng(), 6) + "<br>";
-  payload += "Panel: " + String(panelPos) + "° | Spin: " + String(armSpinPos) + "°<br>";
-  payload += "Lift: " + String(armLiftPos) + "° | Grip: " + String(armGripPos) + "°<br>";
-  payload += "LoRa RSSI: " + String(LoRa.packetRssi());
-  return payload;
-}
-
-void handleTelemetryRequest() {
-  server.send(200, "text/plain", getTelemetryPayload());
-}
-
-void handleAction() {
-  String cmd = server.arg("go");
-
+// --- Action Executing Helper ---
+void executeCommand(String cmd) {
   if (cmd == "forward") {
     digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
     digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
@@ -198,7 +230,31 @@ void handleAction() {
     armGripPos = max(0, armGripPos - 15);
     armGripServo.write(armGripPos);
   }
+}
 
+// --- Server Route Handlers ---
+void handleRoot() {
+  server.send(200, "text/html", MAIN_PAGE);
+}
+
+String getTelemetryPayload() {
+  String payload = "";
+  payload += "Mode: " + String(currentMode) + " | WiFi Clients: " + String(WiFi.softAPgetStationNum()) + "<br>";
+  payload += "GPS Sats: " + String(gps.satellites.value()) + " | Fix: " + String(gps.location.isValid() ? "YES" : "NO") + "<br>";
+  payload += "Lat: " + String(gps.location.lat(), 6) + " | Lng: " + String(gps.location.lng(), 6) + "<br>";
+  payload += "Panel: " + String(panelPos) + "° | Spin: " + String(armSpinPos) + "°<br>";
+  payload += "Lift: " + String(armLiftPos) + "° | Grip: " + String(armGripPos) + "°<br>";
+  payload += "ESP-NOW Link: " + String((millis() - lastEspNowPacketTime < 1000) ? "OK" : "DISCONNECTED");
+  return payload;
+}
+
+void handleTelemetryRequest() {
+  server.send(200, "text/plain", getTelemetryPayload());
+}
+
+void handleAction() {
+  String cmd = server.arg("go");
+  executeCommand(cmd);
   server.send(200, "text/plain", getTelemetryPayload());
 }
 
@@ -241,17 +297,15 @@ void setup() {
     display.display();
   }
 
-  // LoRa Transceiver Setup
-  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
-  if (!LoRa.begin(433E6)) {
-    Serial.println("LoRa initialization failed!");
-  } else {
-    Serial.println("LoRa transceiver online!");
-    LoRa.receive();
+  // Access Point & ESP-NOW Initialization
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP("MarsRover-Enterprise", "12345678");
+
+  if (esp_now_init() == ESP_OK) {
+    esp_now_register_recv_cb(OnDataRecv);
+    Serial.println("ESP-NOW Ready!");
   }
 
-  // Access Point Initialization
-  WiFi.softAP("MarsRover-Enterprise", "12345678");
   server.on("/", handleRoot);
   server.on("/action", handleAction);
   server.on("/telemetry", handleTelemetryRequest);
@@ -269,18 +323,12 @@ void loop() {
     gps.encode(Serial2.read());
   }
 
-  // Check for incoming LoRa telemetry packets
-  int packetSize = LoRa.parsePacket();
-  if (packetSize) {
-    String incomingLoRaPacket = "";
-    while (LoRa.available()) {
-      incomingLoRaPacket += (char)LoRa.read();
-    }
-    Serial.print("Received LoRa Command: ");
-    Serial.println(incomingLoRaPacket);
+  // Handle live movement command via ESP-NOW glove/controller if active
+  if (millis() - lastEspNowPacketTime < 500) {
+    executeCommand(espNowManualCmd);
   }
 
-  // Mode Switch Pushbutton Debounce & Execution Logic (Buzzer removed)
+  // Mode Switch Pushbutton Debounce & Execution Logic
   bool reading = digitalRead(BUTTON_PIN);
   if (reading == LOW && lastButtonState == HIGH && millis() - lastButtonPress > 300) {
     currentMode = (currentMode + 1) % 4;
