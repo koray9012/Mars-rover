@@ -91,7 +91,9 @@ The code can be found in repo: Mars Rover Code
 ## Credits: 
 
 This project uses:
+
 Kicad
+
 Hack Club Macondo 
 
 Btw thank you for the Power Supply Hack Club :)
