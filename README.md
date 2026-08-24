@@ -1,6 +1,6 @@
                                                   Mars Rover (Autonamous field  exploration unit)
                                                                    By Koray
-![image alt](https://github.com/koray9012/Mars-Rover/blob/main/mars_rover.jpg?raw=true)
+![image alt](https://github.com/koray9012/Mars-rover/blob/main/16028.jpg?raw=true)
 An ESP32-powered all-terrain exploration rover designed to traverse rough terrain, stream live first-person video feed, and transmit telemetry data wirelessly.
 You can drive it remotely through a custom browser interface or let it execute autonomous obstacle navigation routines.
 
