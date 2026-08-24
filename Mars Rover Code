@@ -1,4 +1,4 @@
-include <WiFi.h>
+#include <WiFi.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
 #include <SPI.h>
@@ -8,20 +8,19 @@ include <WiFi.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// --- System Pin Mapping & Configurations ---
-#define ENA             14
-#define IN1             27
-#define IN2             26
-#define IN3             25
-#define IN4             33
-#define BUTTON_PIN      4
-#define BUZZER_PIN      19
+// --- System Pin Mapping & Configurations (Zero Conflict Layout) ---
+#define ENA             22
+#define IN1             15
+#define IN2             2
+#define IN3             4
+#define IN4             32
+#define BUTTON_PIN      34
 
-// Servo Array Pins (4 Servos for Solar Panel Articulation & Gimbal Gimicks)
-#define SERVO_PANEL_1   13
-#define SERVO_PANEL_2   12
-#define SERVO_GIMBAL_H  23
-#define SERVO_GIMBAL_V  18
+// Servo Array Pins (Solar Panel & 3-Axis Arm: Spinner, Lifter, Gripper)
+#define SERVO_PANEL     13
+#define SERVO_ARM_SPIN  12
+#define SERVO_ARM_LIFT  23
+#define SERVO_ARM_GRIP  21
 
 // GPS Module (GP-01 BDS+GPS) Hardware Serial 2
 #define GPS_RX          16
@@ -46,25 +45,25 @@ WebServer server(80);
 TinyGPSPlus gps;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-Servo panelServo1;
-Servo panelServo2;
-Servo gimbalHServo;
-Servo gimbalVServo;
+Servo panelServo;
+Servo armSpinServo;
+Servo armLiftServo;
+Servo armGripServo;
 
 // --- State Machine & Telemetry Variables ---
 int currentMode = 0; // 0: Auto, 1: Manual+Safety, 2: Suicide, 3: Diagnostics
 unsigned long lastButtonPress = 0;
 bool lastButtonState = HIGH;
 
-int panelPos1 = 0;
-int panelPos2 = 0;
-int gimbalHPos = 90;
-int gimbalVPos = 90;
+int panelPos = 0;
+int armSpinPos = 90;
+int armLiftPos = 90;
+int armGripPos = 90;
 
 unsigned long previousTelemetryMillis = 0;
 const long telemetryInterval = 2000;
 
-// --- Embedded Web Dashboard UI (Full HTML/CSS/JS Payload) ---
+// --- Embedded Web Dashboard UI ---
 const char MAIN_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -100,11 +99,15 @@ const char MAIN_PAGE[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="panel-box">
-      <h3>Solar Array & Gimbal Articulation</h3>
-      <button class="btn servo-btn" onclick="sendCommand('panel_up')">Panel Up (+)</button>
-      <button class="btn servo-btn" onclick="sendCommand('panel_down')">Panel Down (-)</button><br>
-      <button class="btn servo-btn" onclick="sendCommand('gimbal_left')">Gimbal ◄</button>
-      <button class="btn servo-btn" onclick="sendCommand('gimbal_right')">Gimbal ►</button>
+      <h3>Solar & Arm Articulation</h3>
+      <button class="btn servo-btn" onclick="sendCommand('panel_up')">Panel Up</button>
+      <button class="btn servo-btn" onclick="sendCommand('panel_down')">Panel Down</button><br>
+      <button class="btn servo-btn" onclick="sendCommand('spin_left')">Spin ◄</button>
+      <button class="btn servo-btn" onclick="sendCommand('spin_right')">Spin ►</button><br>
+      <button class="btn servo-btn" onclick="sendCommand('lift_up')">Lifter ▲</button>
+      <button class="btn servo-btn" onclick="sendCommand('lift_down')">Lifter ▼</button><br>
+      <button class="btn servo-btn" onclick="sendCommand('grip_open')">Grip Open</button>
+      <button class="btn servo-btn" onclick="sendCommand('grip_close')">Grip Close</button>
     </div>
 
     <div class="status" id="statusBox">
@@ -122,7 +125,6 @@ const char MAIN_PAGE[] PROGMEM = R"rawliteral(
         .then(data => { document.getElementById('statusBox').innerHTML = "<b>[Telemetry Stream]</b><br>" + data; });
     }
     
-    // Auto-refresh telemetry every 3 seconds
     setInterval(function() {
       fetch('/telemetry')
         .then(response => response.text())
@@ -143,9 +145,9 @@ String getTelemetryPayload() {
   payload += "Mode: " + String(currentMode) + " | WiFi Clients: " + String(WiFi.softAPgetStationNum()) + "<br>";
   payload += "GPS Sats: " + String(gps.satellites.value()) + " | Fix: " + String(gps.location.isValid() ? "YES" : "NO") + "<br>";
   payload += "Lat: " + String(gps.location.lat(), 6) + " | Lng: " + String(gps.location.lng(), 6) + "<br>";
-  payload += "Solar Panel Angle: " + String(panelPos1) + "°<br>";
-  payload += "Gimbal Pan: " + String(gimbalHPos) + "° Tilt: " + String(gimbalVPos) + "°<br>";
-  payload += "LoRa Packet RSSI: " + String(LoRa.packetRssi());
+  payload += "Panel: " + String(panelPos) + "° | Spin: " + String(armSpinPos) + "°<br>";
+  payload += "Lift: " + String(armLiftPos) + "° | Grip: " + String(armGripPos) + "°<br>";
+  payload += "LoRa RSSI: " + String(LoRa.packetRssi());
   return payload;
 }
 
@@ -172,21 +174,29 @@ void handleAction() {
     digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
     digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
   } else if (cmd == "panel_up") {
-    panelPos1 = min(180, panelPos1 + 15);
-    panelPos2 = min(180, panelPos2 + 15);
-    panelServo1.write(panelPos1);
-    panelServo2.write(panelPos2);
+    panelPos = min(180, panelPos + 15);
+    panelServo.write(panelPos);
   } else if (cmd == "panel_down") {
-    panelPos1 = max(0, panelPos1 - 15);
-    panelPos2 = max(0, panelPos2 - 15);
-    panelServo1.write(panelPos1);
-    panelServo2.write(panelPos2);
-  } else if (cmd == "gimbal_left") {
-    gimbalHPos = max(0, gimbalHPos - 15);
-    gimbalHServo.write(gimbalHPos);
-  } else if (cmd == "gimbal_right") {
-    gimbalHPos = min(180, gimbalHPos + 15);
-    gimbalHServo.write(gimbalHPos);
+    panelPos = max(0, panelPos - 15);
+    panelServo.write(panelPos);
+  } else if (cmd == "spin_left") {
+    armSpinPos = max(0, armSpinPos - 15);
+    armSpinServo.write(armSpinPos);
+  } else if (cmd == "spin_right") {
+    armSpinPos = min(180, armSpinPos + 15);
+    armSpinServo.write(armSpinPos);
+  } else if (cmd == "lift_up") {
+    armLiftPos = min(180, armLiftPos + 15);
+    armLiftServo.write(armLiftPos);
+  } else if (cmd == "lift_down") {
+    armLiftPos = max(0, armLiftPos - 15);
+    armLiftServo.write(armLiftPos);
+  } else if (cmd == "grip_open") {
+    armGripPos = min(180, armGripPos + 15);
+    armGripServo.write(armGripPos);
+  } else if (cmd == "grip_close") {
+    armGripPos = max(0, armGripPos - 15);
+    armGripServo.write(armGripPos);
   }
 
   server.send(200, "text/plain", getTelemetryPayload());
@@ -195,7 +205,7 @@ void handleAction() {
 // --- Setup Routine ---
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX); // GP-01 GPS Initialization
+  Serial2.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX); // GPS Initialization
 
   // Pin Configurations
   pinMode(ENA, OUTPUT);
@@ -204,20 +214,19 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_PIN, OUTPUT);
   analogWrite(ENA, 220); // Default PWM throttle
 
-  // Attach 4 Servos
-  panelServo1.attach(SERVO_PANEL_1);
-  panelServo2.attach(SERVO_PANEL_2);
-  gimbalHServo.attach(SERVO_GIMBAL_H);
-  gimbalVServo.attach(SERVO_GIMBAL_V);
+  // Attach 4 Servos (1 Solar + 3 Arm)
+  panelServo.attach(SERVO_PANEL);
+  armSpinServo.attach(SERVO_ARM_SPIN);
+  armLiftServo.attach(SERVO_ARM_LIFT);
+  armGripServo.attach(SERVO_ARM_GRIP);
 
   // Initial Servo Positions
-  panelServo1.write(0);
-  panelServo2.write(0);
-  gimbalHServo.write(90);
-  gimbalVServo.write(90);
+  panelServo.write(0);
+  armSpinServo.write(90);
+  armLiftServo.write(90);
+  armGripServo.write(90);
 
   // OLED Display Initialization
   Wire.begin(21, 22);
@@ -238,7 +247,7 @@ void setup() {
     Serial.println("LoRa initialization failed!");
   } else {
     Serial.println("LoRa transceiver online!");
-    LoRa.receive(); // Put LoRa into continuous listening mode
+    LoRa.receive();
   }
 
   // Access Point Initialization
@@ -260,7 +269,7 @@ void loop() {
     gps.encode(Serial2.read());
   }
 
-  // Check for incoming LoRa telemetry packets asynchronously
+  // Check for incoming LoRa telemetry packets
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String incomingLoRaPacket = "";
@@ -271,16 +280,11 @@ void loop() {
     Serial.println(incomingLoRaPacket);
   }
 
-  // Mode Switch Pushbutton Debounce & Execution Logic
+  // Mode Switch Pushbutton Debounce & Execution Logic (Buzzer removed)
   bool reading = digitalRead(BUTTON_PIN);
   if (reading == LOW && lastButtonState == HIGH && millis() - lastButtonPress > 300) {
     currentMode = (currentMode + 1) % 4;
     lastButtonPress = millis();
-    
-    // Audio Confirmation Beep
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(100);
-    digitalWrite(BUZZER_PIN, LOW);
     
     Serial.print("Switched to Operation Mode: ");
     Serial.println(currentMode);
@@ -297,8 +301,7 @@ void loop() {
     display.print(F("Sats: ")); display.println(gps.satellites.value());
     display.print(F("Lat: ")); display.println(gps.location.lat(), 4);
     display.print(F("Lng: ")); display.println(gps.location.lng(), 4);
-    display.print(F("Panel: ")); display.print(panelPos1); display.println(F(" deg"));
+    display.print(F("Panel: ")); display.print(panelPos); display.println(F(" deg"));
     display.display();
   }
-}
 }
