@@ -80,7 +80,7 @@ The code can be found in repo: Mars Rover Code
 
 ## Very important: The motors came with the chasis because they are a kit and also the cables arent exact because I cut them up and soldered them to fit the deck cleanly.
 
-## Video for rover demo ()
+## Video for rover demo (https://www.youtube.com/watch?v=xmUQw59Qynk)
 
 ## Credits: 
 
