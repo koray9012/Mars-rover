@@ -7,19 +7,25 @@ You can drive it remotely through a custom browser interface or let it execute a
 ## Key Upgrades & Features
   
   FPV Camera Streaming:
+  
   • Uses an ESP32-CAM module to stream a live video feed directly to your phone or PC over Wi-Fi so you can pilot it from a true driver's-seat perspective.
 
   All-Terrain 4WD Mobility:
+  
   • Driven by a robust 4-motor chassis powered by an L298N driver, built to handle rough surfaces, carpet, and outdoor dirt paths with ease.
 
   Wireless ESP-NOW / Wi-Fi Control:
+  
   • Connects seamlessly to remote controllers or local networks for responsive, low-latency maneuvering.
   
   Dynamic Operating Modes:
+ 
   • Exploration Mode: Standard manual driving with live FPV video streaming.
+  
   • Telemetry & Debug Mode: Monitors battery voltage and wireless connection strength in real-time.
 
   Onboard Power Management:
+ 
   • Powered by a custom 2S 18650 rechargeable battery pack managed by a dedicated BMS, ensuring stable voltage and high efficiency.
 
 ## How to use: 
@@ -28,13 +34,19 @@ To use it first you need to connect the custom 2S battery pack to the battery co
 
 ## Operating Instructions
 1. Power On
+ 
   1. Connect your custom 2S battery pack to the battery connectors.
+ 
   2. Flip the master power switch to turn on the rover.
+ 
   3. Wait a few seconds for the ESP32-CAM to initialize its Wi-Fi access point.
 
 2. Connecting Your Device (FPV & Wi-Fi Control)
+ 
   1. On your phone or computer, open Wi-Fi settings and connect to the rover's access point.
+ 
   2. Open your browser and enter the designated local IP address to load the video dashboard.
+ 
   3. Use the on-screen controls to steer while watching the live FPV camera feed.
 
 ## Why I made it:
