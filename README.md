@@ -63,15 +63,30 @@ Below is the visual schematic diagram for the Mars Rover.
 
 ### Pinout Breakdown:
 
-| ESP32-CAM Pin | Component | Connected Pin / Note |
+| ESP32 Pin | Component | Connected Pin / Note |
 | :--- | :--- | :--- |
-| **GPIO 14** | L298N Motor Driver | ENA+ENB (PWM Speed Control) |
 | **GPIO 15** | L298N Motor Driver | IN1 (Right Motor) |
-| **GPIO 13** | L298N Motor Driver | IN2 (Right Motor) |
-| **GPIO 12** | L298N Motor Driver | IN3 (Left Motor) |
-| **GPIO 2** | L298N Motor Driver | IN4 (Left Motor) |
+| **GPIO 2** | L298N Motor Driver | IN2 (Right Motor) |
+| **GPIO 4** | L298N Motor Driver | IN3 (Left Motor) |
+| **GPIO 32** | L298N Motor Driver | IN4 (Left Motor) |
 | **5V** | L298N Motor Driver | 5V rail for power |
 | **GND** | Shared GND of all devices | Shared GND cable |
+| **Gpio 21** | Gripper Servo PWM | part of mechanical arm |
+| **Gpio 23** | Lifter Servo PWM | part of mechanical arm |
+| **Gpio 12** | Spinner Servo PWM | part of mechanical arm |
+| **Gpio 13** | Solar Panel Servo PWM | part of mechanical arm |
+| **Gpio 17** | GPS module | RX pin |
+| **Gpio 16** | GPS module | TX pin |
+| **Gpio 26** | LoRa module | DIO0 pin |
+| **Gpio 14** | LoRa module | RST |
+| **Gpio 19** | LoRa module | MISO pin |
+| **Gpio 27** | LoRa module | MOSI pin |
+| **Gpio 18** | LoRa module | NSS pin |
+| **Gpio 5** | LoRa module | SCK pin |
+
+
+
+
 
 ## Code:
 
